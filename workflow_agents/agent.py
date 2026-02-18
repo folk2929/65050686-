@@ -18,7 +18,7 @@ from langchain_community.utilities import WikipediaAPIWrapper
 # ----------------------------
 logging.basicConfig(level=logging.INFO)
 
-# (กันพัง) Cloud Logging ใน Qwiklabs บางครั้ง auth มีปัญหา metadata server
+# Cloud Logging ใน Qwiklabs บางครั้ง auth มีปัญหา metadata server
 try:
     import google.cloud.logging  # type: ignore
     cloud_logging_client = google.cloud.logging.Client()
