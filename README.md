@@ -1,87 +1,110 @@
 # Historical Court – Multi-Agent System (Google ADK)
 
 ## Overview
-ระบบ Multi-Agent จำลอง “ศาลประวัติศาสตร์”  
-วิเคราะห์บุคคลหรือเหตุการณ์จาก Wikipedia โดยแยกข้อมูลเป็น 2 ฝั่ง (บวก/ลบ) แล้วสรุปผลอย่างเป็นกลาง พร้อมบันทึกเป็นไฟล์ `.txt`
+
+โครงงานนี้เป็นการพัฒนา Multi-Agent System ด้วย Google ADK 
+เพื่อจำลอง “ศาลประวัติศาสตร์” สำหรับวิเคราะห์บุคคลหรือเหตุการณ์ทางประวัติศาสตร์จากข้อมูลใน Wikipedia
+
+แนวคิดหลักคือการรวบรวมข้อมูลจาก 2 มุมมองที่ขัดแย้งกัน (ด้านบวกและด้านลบ) 
+จากนั้นตรวจสอบความสมดุลของหลักฐาน ก่อนสรุปผลเป็นรายงานภาษาไทยและบันทึกเป็นไฟล์ .txt
 
 ---
 
-## Architecture
+## Architecture Design
+
+ระบบถูกออกแบบตามลำดับขั้นตอนที่กำหนดในโจทย์
 
 ### Step 1: Inquiry (Sequential)
-Root Agent:
-- รับชื่อหัวข้อจากผู้ใช้
-- เรียก `init_topic()` เพื่อตั้งค่า session state
-- ส่งต่อไปยัง `court_system`
+
+Root Agent ทำหน้าที่:
+- รับหัวข้อจากผู้ใช้
+- เรียก `init_topic()` เพื่อล้างและตั้งค่า session state ใหม่
+- ส่งต่อการทำงานไปยัง `court_system` ซึ่งเป็น SequentialAgent
+
+Session state จะถูกสร้างใหม่ทุกครั้งเพื่อป้องกันข้อมูลค้างจากรอบก่อนหน้า
 
 ---
 
 ### Step 2: Investigation (Parallel)
 
-ใช้ `ParallelAgent` ทำงาน 2 ฝั่งพร้อมกัน:
+ใช้ `ParallelAgent` เพื่อให้ 2 Agent ทำงานพร้อมกัน
 
-**Admirer**
-- เก็บข้อมูลด้านบวก
-- สร้าง FACT 3 ข้อ
-- ห้ามใช้ Wikipedia page ซ้ำ
-- บันทึกลง `pos_data`
+#### Agent A: Admirer
+หน้าที่:
+- ค้นหาเฉพาะข้อมูลด้านบวก เช่น ความสำเร็จ นโยบาย ผลงาน หรือ legacy
+- ใช้คำค้นเช่น:
+  - `{topic}`
+  - `{topic} achievements`
+  - `{topic} legacy`
+- ต้องสร้างข้อมูลจำนวน 3 ข้อ
+- ห้ามใช้หน้า Wikipedia ซ้ำ
+- บันทึกลงใน `pos_data`
+- เก็บชื่อหน้าที่ใช้ไว้ใน `pos_titles_used`
 
-**Critic**
-- เก็บข้อมูลด้านลบ/ข้อโต้แย้ง
-- ใช้ tag:
+#### Agent B: Critic
+หน้าที่:
+- ค้นหาเฉพาะข้อมูลด้านลบ ข้อโต้แย้ง คดี หรือประเด็นอื้อฉาว
+- ใช้คำค้นเช่น:
+  - `{topic} controversy`
+  - `{topic} impeachment`
+  - `{topic} investigation`
+- ต้องสร้างข้อมูล 3 ข้อ โดยใช้ tag ครบดังนี้:
   - FACT[LEGAL]
   - FACT[JAN6]
   - FACT[OTHER]
-- สร้าง 3 ข้อ ครบทุก tag
-- บันทึกลง `neg_data`
+- บันทึกลงใน `neg_data`
+- เก็บชื่อหน้าที่ใช้ไว้ใน `neg_titles_used`
+
+Wiki Research Strategy:
+- ใช้ WikipediaAPIWrapper ผ่าน custom tool `wiki_search`
+- ดึงทั้ง title และ content
+- บังคับอ้างอิงชื่อหน้า (Wikipedia: Page Title)
+- ป้องกันการใช้หน้าเดิมซ้ำ
 
 ---
 
 ### Step 3: Trial & Review (Loop)
 
-Judge ตรวจสอบ:
+ใช้ `LoopAgent` ที่มี Investigation และ Judge อยู่ภายใน
 
-- pos_count ≥ 3  
-- neg_count ≥ 3  
-- abs(pos_count - neg_count) ≤ 1  
-- negative tags ครบ  
+#### Judge Agent ทำหน้าที่:
 
-ถ้ายังไม่สมดุล:
-- เรียก `set_suffixes()` ปรับ keyword
-- ทำ loop ต่อ
+ตรวจสอบ session state ดังนี้:
 
-ถ้าสมดุล:
+1. จำนวนข้อมูลด้านบวก ≥ 3
+2. จำนวนข้อมูลด้านลบ ≥ 3
+3. ความแตกต่างของจำนวนไม่เกิน 1
+4. ฝั่งลบต้องมี tag ครบทั้ง:
+   - FACT[LEGAL]
+   - FACT[JAN6]
+   - FACT[OTHER]
+
+ใช้ tool `check_neg_tags()` เพื่อตรวจสอบ tag อย่างเป็นระบบ
+
+หากข้อมูลยังไม่สมดุล:
+- เรียก `set_suffixes()` เพื่อปรับ keyword ให้เจาะจงมากขึ้น
+- Loop ทำงานใหม่
+
+หากข้อมูลครบและสมดุล:
 - เรียก `exit_loop()` เพื่อจบ loop
 
-⚠ ใช้ tool เท่านั้น ห้ามจบด้วย prompt
+เงื่อนไขสำคัญ:
+การจบ loop ต้องใช้ `exit_loop` tool เท่านั้น 
+ไม่ใช้การตัดสินจาก prompt อย่างเดียว
 
 ---
 
 ### Step 4: Verdict (Output)
 
-Verdict Writer:
-- แปล FACT เป็นภาษาไทย
-- จัดหมวดหมู่บวก/ลบ
-- คำนวณจำนวน
+Verdict Writer ทำหน้าที่:
+
+- แปลข้อมูล FACT เป็นภาษาไทย
+- แยกหมวดหมู่ด้านบวกและด้านลบ
+- คำนวณจำนวน pos_count และ neg_count
 - สรุปผลว่า:
   - ถูกมากกว่าผิด
   - ผิดมากกว่าถูก
   - สูสี
-- บันทึกไฟล์ `outputs/<topic>.txt`
 
----
+ไฟล์จะถูกบันทึกด้วย `write_file()` ที่:
 
-## State Management
-
-Session State ที่ใช้:
-
-- topic
-- pos_data
-- neg_data
-- pos_titles_used
-- neg_titles_used
-- pos_suffix
-- neg_suffix
-- required_neg_tags
-
-ใช้ templating เช่น:
